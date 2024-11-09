@@ -5,8 +5,9 @@ const router = require("./routes/book_route");
 const cors = require("cors");
 const promClient = require('prom-client');
 require('dotenv').config();
-//  Rkh60h9mUYo9NWEx password.
+const morgan = require('morgan');
 
+// Prometheus Metrics
 const httpRequestCounter = new promClient.Counter({
     name: 'http_requests_total',
     help: 'Total number of HTTP requests',
@@ -24,24 +25,22 @@ const requestDurationSummary = new promClient.Summary({
     name: 'http_request_duration_summary_seconds',
     help: 'Summary of the duration of HTTP requests in seconds',
     labelNames: ['method', 'path', 'status_code'],
-    percentiles: [0.5, 0.9, 0.99], // Define your percentiles here
+    percentiles: [0.5, 0.9, 0.99],
 });
 
-
-
-// Gauge metric
 const gauge = new promClient.Gauge({
     name: 'node_gauge_example',
     help: 'Example of a gauge tracking async task duration',
     labelNames: ['method', 'status']
 });
 
+// Middleware for Metrics Collection
 app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
         const duration = (Date.now() - start) / 1000; // Duration in seconds
         const { method, url } = req;
-        const statusCode = res.statusCode; // Get the actual HTTP status code
+        const statusCode = res.statusCode;
         httpRequestCounter.labels({ method, path: url, status_code: statusCode }).inc();
         requestDurationHistogram.labels({ method, path: url, status_code: statusCode }).observe(duration);
         requestDurationSummary.labels({ method, path: url, status_code: statusCode }).observe(duration);
@@ -49,28 +48,40 @@ app.use((req, res, next) => {
     next();
 });
 
-// middleware section
-// Now we dont need because i create router.
-// app.use("/", (req, resp, next) => {
-//   resp.send("This is Starting Application");
-// });
-app.use(express.json()); // it convert all the data to the json very !IMPORTANT and it intialize at the top (rule)
+// Middleware: JSON body parsing & CORS
+app.use(express.json());
 app.use(cors());
-app.use("/api/books", router); // localhost:5000/books all the things handle in our (router). now to check run on postman localhost:5000/books.
+app.use(morgan('combined'));  // HTTP request logging
 
+// Routes
+app.use("/api/books", router);
+
+// Prometheus Metrics Endpoint
 app.get('/metrics', async (req, res) => {
     res.set('Content-Type', promClient.register.contentType);
     res.end(await promClient.register.metrics());
 });
 
+// MongoDB Connection and Server Startup
 mongoose
-  .connect(
-    process.env.MONGO_URL )
-  .then(() => console.log("connected DataBase"))
+  .connect(process.env.MONGO_URL)
   .then(() => {
-    app.listen(5000);
+    console.log("Connected to MongoDB");
+    app.listen(5000, () => {
+        console.log("Server is running on port 5000");
+    });
   })
-  .catch((err) => console.log(err));
+  .catch((err) => {
+    console.error('Database connection error:', err);
+    process.exit(1); // Exit the process if DB connection fails
+  });
+
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err.stack);
+    res.status(500).send('Something went wrong!');
+});
+
 
 // 54:00 now Backend is complete
 // you have to also install cors to block the security
